@@ -180,7 +180,10 @@ module.exports = function(User) {
    * @param {AccessToken} token Access token if login is successful
    */
 
-  User.login = function(credentials, include, fn) {
+  User.login = function(credentials, req, include, fn) {
+    const options = {
+      schema: req.headers.tenantname
+    };
     var self = this;
     if (typeof include === 'function') {
       fn = include;
@@ -223,7 +226,7 @@ module.exports = function(User) {
       return fn.promise;
     }
 
-    self.findOne({where: query}, function(err, user) {
+    self.findOne({where: query}, options, function(err, user) {
       var defaultError = new Error(g.f('login failed'));
       defaultError.statusCode = 401;
       defaultError.code = 'LOGIN_FAILED';
@@ -446,7 +449,7 @@ module.exports = function(User) {
       if (err) { return fn(err); }
 
       user.verificationToken = token;
-      user.save(function(err) {
+      user.save({schema: options.schema}, function(err) {
         if (err) {
           fn(err);
         } else {
@@ -528,16 +531,20 @@ module.exports = function(User) {
    * @callback {Function} callback
    * @param {Error} err
    */
-  User.confirm = function(uid, token, redirect, fn) {
+  User.confirm = function(uid, token, redirect, req, fn) {
+    const {query} = req;
+    const options = {
+      schema: query.tenantName
+    };
     fn = fn || utils.createPromiseCallback();
-    this.findById(uid, function(err, user) {
+    this.findById(uid, options, function(err, user) {
       if (err) {
         fn(err);
       } else {
         if (user && user.verificationToken === token) {
           user.verificationToken = null;
           user.emailVerified = true;
-          user.save(function(err) {
+          user.save(options, function(err) {
             if (err) {
               fn(err);
             } else {
@@ -572,7 +579,9 @@ module.exports = function(User) {
    * @param {Error} err
    */
 
-  User.resetPassword = function(options, cb) {
+  User.resetPassword = function(payload, cb) {
+    var options = {email: payload.email};
+    var schema = {schema: payload.schema};
     cb = cb || utils.createPromiseCallback();
     var UserModel = this;
     var ttl = UserModel.settings.resetPasswordTokenTTL || DEFAULT_RESET_PW_TTL;
@@ -598,7 +607,7 @@ module.exports = function(User) {
     if (options.realm) {
       where.realm = options.realm;
     }
-    UserModel.findOne({ where: where }, function(err, user) {
+    UserModel.findOne({ where: where }, schema, function(err, user) {
       if (err) {
         return cb(err);
       }
@@ -624,6 +633,7 @@ module.exports = function(User) {
         cb();
         UserModel.emit('resetPasswordRequest', {
           email: options.email,
+          schema: payload.schema,
           accessToken: accessToken,
           user: user,
           options: options,
@@ -732,6 +742,7 @@ module.exports = function(User) {
         description: 'Login a user with username/email and password.',
         accepts: [
           {arg: 'credentials', type: 'object', required: true, http: {source: 'body'}},
+          {arg: "req", type: "object", http: {source: "req"}},
           {arg: 'include', type: ['string'], http: {source: 'query'},
             description: 'Related objects to include in the response. ' +
             'See the description of return value for more details.' },
@@ -755,10 +766,9 @@ module.exports = function(User) {
         description: 'Logout a user with access token.',
         accepts: [
           {arg: 'access_token', type: 'string', http: function(ctx) {
-              var req = ctx && ctx.req;
-              var accessToken = req && req.accessToken;
-              var tokenID = accessToken ? accessToken.id : undefined;
-              return tokenID;
+              var headers = ctx && ctx.req && ctx.req.headers;
+              var accessToken = (headers && headers.accesstoken) || undefined;
+              return accessToken;
             }, description: 'Do not supply this argument, it is automatically extracted ' +
             'from request headers.',
         },
@@ -774,7 +784,8 @@ module.exports = function(User) {
         accepts: [
           {arg: 'uid', type: 'string', required: true},
           {arg: 'token', type: 'string', required: true},
-          {arg: 'redirect', type: 'string'}
+          {arg: 'redirect', type: 'string'},
+          {arg: "req", type: "object", "http": {source: "req"}},
         ],
         http: {verb: 'get', path: '/confirm'}
       }
